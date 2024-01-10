@@ -1,0 +1,4 @@
+dataset
+src/__pycache__
+notebooks/local*
+lightning_logs

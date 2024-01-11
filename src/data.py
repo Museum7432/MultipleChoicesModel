@@ -4,9 +4,15 @@ from torch.utils.data import DataLoader, Dataset, random_split
 from transformers import AutoTokenizer
 import numpy as np
 import torch
-import random
+import random, string
 from argparse import ArgumentParser
 from sklearn.model_selection import train_test_split
+
+
+
+def randomword(length=20):
+   letters = string.ascii_lowercase
+   return ''.join(random.choice(letters) for i in range(length))
 
 
 class SemevalDataset(Dataset):
@@ -17,6 +23,7 @@ class SemevalDataset(Dataset):
         promt_style=True,
         include_label=True,
         shuffle_choices=False,
+        reduce_choices=False
     ):
         self.tokenizer = AutoTokenizer.from_pretrained(encoder_name)
 
@@ -49,6 +56,8 @@ class SemevalDataset(Dataset):
             ]
         else:
             self.choice_indicator = self.tokenizer.eos_token
+        
+        self.reduce_choices = reduce_choices
 
         self.entries = [self._process_raw(item) for item in raw_data]
 
@@ -69,6 +78,14 @@ class SemevalDataset(Dataset):
 
             for c in item["choice_list"]:
                 assert self.choice_indicator not in c
+        
+        if self.reduce_choices:
+            assert item["choice_list"][-1] == "None of above."
+        
+        # remove the newline char
+        item["question"] = item["question"].replace("\n", "")
+
+        item["choice_list"] = [s.replace("\n", "") for s in item["choice_list"]]
 
         if self.include_label:
             return {
@@ -89,14 +106,25 @@ class SemevalDataset(Dataset):
         item = self.entries[idx]
 
         input_text = item["question"]
+        label = item["label"]
+
+        choice_list = item["choice_list"].copy()
+
+        # assume that the last item of choice_list is always "None of above."
+        # randomly turn 1 of the other choices into a random string
+
+        if self.reduce_choices and random.random() < 0.5:
+            indice = randint(0, 2)
+            choice_list[indice] = randomword(15)
+
+            if indice == label:
+                label = 3
 
         if self.shuffle_choices:
             # shuffle the choice list
-            tmp = list(enumerate(item["choice_list"]))
+            tmp = list(enumerate(choice_list))
             random.shuffle(tmp)
             old_indices, choice_list = zip(*tmp)
-        else:
-            choice_list = item["choice_list"]
 
         indicators_char_offset = []
 
@@ -127,9 +155,9 @@ class SemevalDataset(Dataset):
 
         if self.include_label:
             if self.shuffle_choices:
-                re["label"] = old_indices.index(item["label"])
+                re["label"] = old_indices.index(label)
             else:
-                re["label"] = item["label"]
+                re["label"] = label
 
         return re
 
@@ -176,6 +204,7 @@ class SemevalDataModule(L.LightningDataModule):
         train_batch_size: int = 2,
         valid_batch_size: int = 4,
         debug: bool = False,
+        reduce_choices: bool = False
     ):
         super().__init__()
 
@@ -198,6 +227,8 @@ class SemevalDataModule(L.LightningDataModule):
         self.pad_token_id = None
 
         self.debug = debug
+
+        self.reduce_choices = reduce_choices
 
     # @staticmethod
     # def add_model_specific_args(parent_parser):
@@ -231,6 +262,7 @@ class SemevalDataModule(L.LightningDataModule):
             promt_style=self.promt_style,
             include_label=True,
             shuffle_choices=self.shuffle_choices,
+            reduce_choices = self.reduce_choices
         )
 
         self.validDataset = SemevalDataset(
@@ -239,6 +271,7 @@ class SemevalDataModule(L.LightningDataModule):
             promt_style=self.promt_style,
             include_label=True,
             shuffle_choices=False,
+            reduce_choices=False
         )
 
         self.testDataset = SemevalDataset(
@@ -247,6 +280,7 @@ class SemevalDataModule(L.LightningDataModule):
             promt_style=self.promt_style,
             include_label=False,
             shuffle_choices=False,
+            reduce_choices=False
         )
 
         self.pad_token_id = self.trainDataset.tokenizer.pad_token_id

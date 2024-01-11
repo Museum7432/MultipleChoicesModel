@@ -29,6 +29,7 @@ class MultipleChoicesModel(L.LightningModule):
         loss_threshold=None,
         log_dir=None,
         no_hidden_layer=False,
+        lr_scheduler_gamma=0.75
     ):
         """
         :param encoder_name: encoder name; for T5 model, only the encoder will be used.
@@ -77,6 +78,8 @@ class MultipleChoicesModel(L.LightningModule):
         self.use_last_hidden_state = use_last_hidden_state
 
         self.log_dir = log_dir
+
+        self.lr_scheduler_gamma = lr_scheduler_gamma
 
     # @staticmethod
     # def add_model_specific_args(parent_parser):
@@ -170,7 +173,7 @@ class MultipleChoicesModel(L.LightningModule):
             label=batch["label"],
         ).sum()
 
-        self.valid_f1(res["pred_choices"], batch["label"])
+        self.valid_f1(res["pred_choices"].detach(), batch["label"].detach())
         self.log("valid_f1", self.valid_f1)
         self.log("valid_loss", loss.detach())
 
@@ -181,14 +184,19 @@ class MultipleChoicesModel(L.LightningModule):
 
         return self.optimizer
 
-        self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode="min", min_lr=self.lr / 20, verbose=True
-        )
+        # self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        #     self.optimizer, mode="min", min_lr=self.lr / 20, verbose=True
+        # )
 
+        self.lr_scheduler = torch.optim.lr_scheduler.StepLR(
+            self.optimizer,
+            step_size=2,
+            gamma=self.lr_scheduler_gamma
+        )
+        
         scheduler = {
             "scheduler": self.lr_scheduler,
-            "reduce_on_plateau": True,
-            "monitor": "val_checkpoint_on",
+            "interval": "epoch"
         }
 
         return [self.optimizer], [scheduler]

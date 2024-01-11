@@ -106,18 +106,20 @@ class SemevalDataset(Dataset):
         item = self.entries[idx]
 
         input_text = item["question"]
-        label = item["label"]
+
+        if self.include_label:
+            label = item["label"]
 
         choice_list = item["choice_list"].copy()
 
         # assume that the last item of choice_list is always "None of above."
         # randomly turn 1 of the other choices into a random string
 
-        if self.reduce_choices and random.random() < 0.5:
-            indice = randint(0, 2)
+        if self.reduce_choices and random.random() < 0.75:
+            indice = random.randint(0, 2)
             choice_list[indice] = randomword(15)
 
-            if indice == label:
+            if self.include_label and indice == label:
                 label = 3
 
         if self.shuffle_choices:

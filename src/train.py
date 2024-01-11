@@ -36,9 +36,9 @@ def main(args):
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
     checkpoint_callback = ModelCheckpoint(
-        monitor='valid_f1',
+        monitor='valid_loss',
         mode="max",
-        save_top_k=5,
+        save_top_k=2,
         save_last=True,
         save_weights_only=True,
         dirpath=log_dir+"/checkpoint"

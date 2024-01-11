@@ -29,7 +29,7 @@ class MultipleChoicesModel(L.LightningModule):
         loss_threshold=None,
         log_dir=None,
         no_hidden_layer=False,
-        lr_scheduler_gamma=0.75
+        lr_scheduler_gamma=0.75,
     ):
         """
         :param encoder_name: encoder name; for T5 model, only the encoder will be used.
@@ -56,14 +56,19 @@ class MultipleChoicesModel(L.LightningModule):
 
         hidden_size = self.encoder.config.hidden_size
 
+        dropout_prob = 0.1
+
         if no_hidden_layer:
             self.choices_classifier = nn.Sequential(
+                nn.Dropout(dropout_prob),
                 nn.Linear(hidden_size * 2, 1),
             )
         else:
             self.choices_classifier = nn.Sequential(
+                nn.Dropout(dropout_prob),
                 nn.Linear(hidden_size * 2, hidden_size),
                 nn.GELU(),
+                nn.Dropout(dropout_prob),
                 nn.Linear(hidden_size, 1),
             )
 
@@ -182,24 +187,37 @@ class MultipleChoicesModel(L.LightningModule):
     def configure_optimizers(self):
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
 
-        return self.optimizer
+        # return self.optimizer
 
-        # self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        #     self.optimizer, mode="min", min_lr=self.lr / 20, verbose=True
-        # )
-
-        self.lr_scheduler = torch.optim.lr_scheduler.StepLR(
+        self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
-            step_size=2,
-            gamma=self.lr_scheduler_gamma
+            mode="min",
+            min_lr=self.lr / 20,
+            verbose=True,
+            factor=self.lr_scheduler_gamma,
+            patience=3,
         )
-        
+
         scheduler = {
             "scheduler": self.lr_scheduler,
-            "interval": "epoch"
+            "reduce_on_plateau": True,
+            "monitor": "valid_loss",
         }
 
         return [self.optimizer], [scheduler]
+
+        # self.lr_scheduler = torch.optim.lr_scheduler.StepLR(
+        #     self.optimizer,
+        #     step_size=2,
+        #     gamma=self.lr_scheduler_gamma
+        # )
+
+        # scheduler = {
+        #     "scheduler": self.lr_scheduler,
+        #     "interval": "epoch"
+        # }
+
+        # return [self.optimizer], [scheduler]
 
     def on_test_epoch_start(self):
         self.test_res = []

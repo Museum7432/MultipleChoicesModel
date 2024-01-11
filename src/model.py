@@ -12,6 +12,8 @@ from allennlp_light.nn.util import (
     masked_log_softmax,
 )
 
+import pathlib
+
 from transformers.optimization import get_linear_schedule_with_warmup
 
 import torchmetrics
@@ -24,6 +26,9 @@ class MultipleChoicesModel(L.LightningModule):
         encoder_name="google/flan-t5-large",
         lr=1e-5,
         use_last_hidden_state=True,
+        loss_threshold=None,
+        log_dir=None,
+        no_hidden_layer=False,
     ):
         """
         :param encoder_name: encoder name; for T5 model, only the encoder will be used.
@@ -42,18 +47,24 @@ class MultipleChoicesModel(L.LightningModule):
                 add_pooling_layer=False,
             )
 
-        
         self.encoder = encoder
 
         self.lr = lr
 
+        self.loss_threshold = loss_threshold
+
         hidden_size = self.encoder.config.hidden_size
 
-        self.choices_classifier = nn.Sequential(
-            nn.Linear(hidden_size * 2, hidden_size),
-            nn.GELU(),
-            nn.Linear(hidden_size, 1),
-        )
+        if no_hidden_layer:
+            self.choices_classifier = nn.Sequential(
+                nn.Linear(hidden_size * 2, 1),
+            )
+        else:
+            self.choices_classifier = nn.Sequential(
+                nn.Linear(hidden_size * 2, hidden_size),
+                nn.GELU(),
+                nn.Linear(hidden_size, 1),
+            )
 
         # TODO: num_classes is not always 4
         self.train_f1 = torchmetrics.classification.F1Score(
@@ -65,14 +76,16 @@ class MultipleChoicesModel(L.LightningModule):
 
         self.use_last_hidden_state = use_last_hidden_state
 
-    @staticmethod
-    def add_model_specific_args(parent_parser):
-        parser = parent_parser.add_argument_group("MultipleChoicesModel")
-        parser.add_argument("--encoder_name", type=str, default="google/flan-t5-large")
-        parser.add_argument("--lr", type=float, default=1e-5)
-        # since flanT5 didnt add any special token to the start of the input
-        parser.add_argument("--use_last_hidden_state", action="store_true")
-        return parent_parser
+        self.log_dir = log_dir
+
+    # @staticmethod
+    # def add_model_specific_args(parent_parser):
+    #     parser = parent_parser.add_argument_group("MultipleChoicesModel")
+    #     parser.add_argument("--encoder_name", type=str, default="google/flan-t5-large")
+    #     parser.add_argument("--lr", type=float, default=1e-5)
+    #     # since flanT5 didnt add any special token to the start of the input
+    #     parser.add_argument("--use_last_hidden_state", action="store_true")
+    #     return parent_parser
 
     def forward(self, batch):
         encoded = self.encoder(
@@ -94,7 +107,9 @@ class MultipleChoicesModel(L.LightningModule):
 
         # combine question_state with choices_states
 
-        question_choice_rep = torch.cat([question_state.expand_as(choices_states), choices_states], dim=-1)
+        question_choice_rep = torch.cat(
+            [question_state.expand_as(choices_states), choices_states], dim=-1
+        )
 
         choices_logits = self.choices_classifier(question_choice_rep).squeeze(2)
 
@@ -103,7 +118,6 @@ class MultipleChoicesModel(L.LightningModule):
         )
 
         pred_choices = choices_probs.argmax(dim=1)
-        
 
         return {
             "choices_logits": choices_logits,
@@ -120,7 +134,7 @@ class MultipleChoicesModel(L.LightningModule):
 
         nof_choices = indicators_token_offset_mask.sum(-1)
 
-        loss = (loss / nof_choices).sum()
+        loss = loss / nof_choices
 
         return loss
 
@@ -132,6 +146,14 @@ class MultipleChoicesModel(L.LightningModule):
             indicators_token_offset_mask=batch["indicators_token_offset_mask"],
             label=batch["label"],
         )
+
+        # TODO: mask all loss values that is smaller than 0.03
+
+        if self.loss_threshold:
+            mask = torch.where(loss < self.loss_threshold, 0.0, 1.0)
+            loss = loss * mask
+
+        loss = loss.sum()
 
         self.train_f1(res["pred_choices"], batch["label"])
 
@@ -146,7 +168,7 @@ class MultipleChoicesModel(L.LightningModule):
             choices_logits=res["choices_logits"],
             indicators_token_offset_mask=batch["indicators_token_offset_mask"],
             label=batch["label"],
-        )
+        ).sum()
 
         self.valid_f1(res["pred_choices"], batch["label"])
         self.log("valid_f1", self.valid_f1)
@@ -156,9 +178,9 @@ class MultipleChoicesModel(L.LightningModule):
 
     def configure_optimizers(self):
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
-        
+
         return self.optimizer
-        
+
         self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode="min", min_lr=self.lr / 20, verbose=True
         )
@@ -170,3 +192,22 @@ class MultipleChoicesModel(L.LightningModule):
         }
 
         return [self.optimizer], [scheduler]
+
+    def on_test_epoch_start(self):
+        self.test_res = []
+
+    @torch.no_grad()
+    def test_step(self, batch):
+        res = self(batch)
+
+        self.test_res += res["pred_choices"].detach().tolist()
+
+    def on_test_epoch_end(self):
+        # self.global_step
+        pathlib.Path(self.log_dir, "eval").mkdir(exist_ok=True)
+
+        output_file = pathlib.Path(self.log_dir, "eval", str(self.global_step) + ".txt")
+
+        with open(output_file, "w") as txt_file:
+            for i in self.test_res:
+                txt_file.write(str(i) + "\n")

@@ -168,6 +168,7 @@ class SemevalDataModule(L.LightningDataModule):
     def __init__(
         self,
         train_data_path: str = None,
+        eval_data_path: str = None,
         encoder_name: str = "google/flan-t5-large",
         promt_style: bool = True,
         shuffle_choices: bool = True,
@@ -179,6 +180,8 @@ class SemevalDataModule(L.LightningDataModule):
         super().__init__()
 
         self.train_data_path = train_data_path
+
+        self.eval_data_path = eval_data_path
 
         self.encoder_name = encoder_name
 
@@ -196,23 +199,27 @@ class SemevalDataModule(L.LightningDataModule):
 
         self.debug = debug
 
-    def add_model_specific_args(parent_parser):
-        parser = parent_parser.add_argument_group("SemevalDataModule")
-        parser.add_argument("--promt_style", action="store_true")
-        # only for train_dataset
-        parser.add_argument("--shuffle_choices", action="store_true")
-        parser.add_argument("--train_data_path", type=str, default=None)
-        parser.add_argument("--train_batch_size", type=int, default=2)
-        parser.add_argument("--valid_batch_size", type=int, default=8)
-        parser.add_argument("--num_workers", type=int, default=4)
-        parser.add_argument("--debug", action="store_true")
-        return parent_parser
+    # @staticmethod
+    # def add_model_specific_args(parent_parser):
+    #     parser = parent_parser.add_argument_group("SemevalDataModule")
+    #     parser.add_argument("--promt_style", action="store_true")
+    #     # only for train_dataset
+    #     parser.add_argument("--shuffle_choices", action="store_true")
+    #     parser.add_argument("--train_data_path", type=str, default=None)
+    #     parser.add_argument("--eval_data_path", type=str, default=None)
+    #     parser.add_argument("--train_batch_size", type=int, default=2)
+    #     parser.add_argument("--valid_batch_size", type=int, default=8)
+    #     parser.add_argument("--num_workers", type=int, default=4)
+    #     parser.add_argument("--debug", action="store_true")
+    #     return parent_parser
 
     def setup(self, stage: str):
         train_data = list(np.load(self.train_data_path, allow_pickle=True))
+        eval_data = list(np.load(self.eval_data_path, allow_pickle=True))
 
         if self.debug:
             train_data = train_data[:20]
+            eval_data = eval_data[:20]
 
         train_set, valid_set = train_test_split(
             train_data, test_size=0.1, random_state=42
@@ -234,6 +241,14 @@ class SemevalDataModule(L.LightningDataModule):
             shuffle_choices=False,
         )
 
+        self.testDataset = SemevalDataset(
+            raw_data=eval_data,
+            encoder_name=self.encoder_name,
+            promt_style=self.promt_style,
+            include_label=False,
+            shuffle_choices=False,
+        )
+
         self.pad_token_id = self.trainDataset.tokenizer.pad_token_id
 
     def train_dataloader(self):
@@ -252,6 +267,15 @@ class SemevalDataModule(L.LightningDataModule):
             batch_size=self.valid_batch_size,
             collate_fn=collate_fn_factory(self.pad_token_id),
             pin_memory=True,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
+
+    def test_dataloader(self):
+        return DataLoader(
+            self.testDataset,
+            batch_size=self.valid_batch_size,
+            collate_fn=collate_fn_factory(self.pad_token_id),
             shuffle=False,
             num_workers=self.num_workers,
         )

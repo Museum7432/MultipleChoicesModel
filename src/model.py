@@ -11,6 +11,7 @@ from allennlp_light.nn.util import (
     masked_softmax,
     masked_log_softmax,
 )
+from sklearn.metrics import f1_score
 
 import pathlib
 
@@ -73,14 +74,14 @@ class MultipleChoicesModel(L.LightningModule):
             )
 
         # TODO: num_classes is not always 4
-        self.train_f1 = torchmetrics.classification.F1Score(
-            task="multiclass", num_classes=4
-        )
+        
         self.valid_f1 = torchmetrics.classification.F1Score(
             task="multiclass", num_classes=4
         )
 
-        self.valid_acc = torchmetrics.Accuracy()
+        self.valid_acc = torchmetrics.Accuracy(
+            task="multiclass", num_classes=4
+        )
 
         self.use_last_hidden_state = use_last_hidden_state
 
@@ -152,8 +153,10 @@ class MultipleChoicesModel(L.LightningModule):
         self.train_res = {"pred": [], "label": []}
 
     def on_train_epoch_end(self):
-        self.train_f1(self.train_res["pred"], self.train_res["label"])
-        self.log("train_f1", self.train_f1)
+
+        f1_score = f1_score(self.train_res["pred"], self.train_res["label"], average='micro')
+
+        self.log("train_f1", f1_score)
         self.train_res = {"pred": [], "label": []}
 
     def training_step(self, batch):
@@ -168,7 +171,7 @@ class MultipleChoicesModel(L.LightningModule):
             label=batch["label"],
         )
 
-        # TODO: mask all loss values that is smaller than 0.3
+        # TODO: mask all loss values that is smaller than 0.2
 
         if self.loss_threshold:
             mask = torch.where(loss < self.loss_threshold, 0.0, 1.0)
@@ -191,7 +194,7 @@ class MultipleChoicesModel(L.LightningModule):
         self.valid_f1(res["pred_choices"].detach(), batch["label"].detach())
         self.valid_acc(res["pred_choices"].detach(), batch["label"].detach())
         self.log("valid_acc", self.valid_acc)
-        self.log("valid_f1", self.valid_f1)
+        self.log("valid_f1", self.valid_f1, prog_bar=True)
         self.log("valid_loss", loss.detach())
 
         return loss

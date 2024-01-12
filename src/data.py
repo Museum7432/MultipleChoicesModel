@@ -4,14 +4,13 @@ from torch.utils.data import DataLoader, Dataset, random_split
 from transformers import AutoTokenizer
 import numpy as np
 import torch
-import random, string
+import random
 from argparse import ArgumentParser
 from sklearn.model_selection import train_test_split
 
 
-def randomword(length=20):
-    letters = string.ascii_lowercase
-    return "".join(random.choice(letters) for i in range(length))
+def randomsent(length=20):
+    return "".join(random.choice("abcdefghijklmnopqrstuvwxyz ") for i in range(length))
 
 
 class SemevalDataset(Dataset):
@@ -135,7 +134,10 @@ class SemevalDataset(Dataset):
                     label = choice_list.index(answer)
                 else:
                     label = len(choice_list) - 1
-
+            
+            for _ in range(4-len(choice_list)):
+                choice_list.append(randomsent(18))
+        
         if self.shuffle_choices:
             # shuffle the choice list
             tmp = list(enumerate(choice_list))

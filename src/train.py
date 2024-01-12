@@ -17,7 +17,7 @@ def main(args):
         promt_style = args.promt_style,
         shuffle_choices = args.shuffle_choices,
         num_workers = args.num_workers,
-        train_batch_size = args.valid_batch_size,
+        train_batch_size = args.train_batch_size,
         valid_batch_size= args.valid_batch_size,
         debug= args.debug,
         reduce_choices=args.reduce_choices
@@ -85,7 +85,7 @@ if __name__ == "__main__":
 
     
     parser.add_argument("--encoder_name", type=str, default="google/flan-t5-large")
-    parser.add_argument("--lr", type=float, default=1e-5)
+    parser.add_argument("--lr", type=float, default=5e-6)
     parser.add_argument("--lr_scheduler_gamma", type=float, default=0.75)
     parser.add_argument("--loss_threshold", type=float, default=None)
     # since flanT5 didnt add any special token to the start of the input
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_data_path", type=str, default=None)
     parser.add_argument("--eval_data_path", type=str, default=None)
     parser.add_argument("--train_batch_size", type=int, default=2)
-    parser.add_argument("--valid_batch_size", type=int, default=8)
+    parser.add_argument("--valid_batch_size", type=int, default=2)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--debug", action="store_true")
 

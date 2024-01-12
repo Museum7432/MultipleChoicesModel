@@ -80,6 +80,8 @@ class MultipleChoicesModel(L.LightningModule):
             task="multiclass", num_classes=4
         )
 
+        self.valid_acc = torchmetrics.Accuracy()
+
         self.use_last_hidden_state = use_last_hidden_state
 
         self.log_dir = log_dir
@@ -146,8 +148,19 @@ class MultipleChoicesModel(L.LightningModule):
 
         return loss
 
+    def on_train_epoch_start(self):
+        self.train_res = {"pred": [], "label": []}
+
+    def on_train_epoch_end(self):
+        self.train_f1(self.train_res["pred"], self.train_res["label"])
+        self.log("train_f1", self.train_f1)
+        self.train_res = {"pred": [], "label": []}
+
     def training_step(self, batch):
         res = self(batch)
+
+        self.train_res["pred"] += res["pred_choices"].detach().tolist()
+        self.train_res["label"] += batch["label"].detach().tolist()
 
         loss = self.calc_masked_loss(
             choices_logits=res["choices_logits"],
@@ -155,7 +168,7 @@ class MultipleChoicesModel(L.LightningModule):
             label=batch["label"],
         )
 
-        # TODO: mask all loss values that is smaller than 0.03
+        # TODO: mask all loss values that is smaller than 0.3
 
         if self.loss_threshold:
             mask = torch.where(loss < self.loss_threshold, 0.0, 1.0)
@@ -163,9 +176,6 @@ class MultipleChoicesModel(L.LightningModule):
 
         loss = loss.sum()
 
-        self.train_f1(res["pred_choices"], batch["label"])
-
-        self.log("train_f1", self.train_f1)
         self.log("loss", loss.detach(), prog_bar=True)
         return loss
 
@@ -179,6 +189,8 @@ class MultipleChoicesModel(L.LightningModule):
         ).sum()
 
         self.valid_f1(res["pred_choices"].detach(), batch["label"].detach())
+        self.valid_acc(res["pred_choices"].detach(), batch["label"].detach())
+        self.log("valid_acc", self.valid_acc)
         self.log("valid_f1", self.valid_f1)
         self.log("valid_loss", loss.detach())
 
@@ -187,24 +199,24 @@ class MultipleChoicesModel(L.LightningModule):
     def configure_optimizers(self):
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
 
-        # return self.optimizer
+        return self.optimizer
 
-        self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer,
-            mode="min",
-            min_lr=self.lr / 20,
-            verbose=True,
-            factor=self.lr_scheduler_gamma,
-            patience=3,
-        )
+        # self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        #     self.optimizer,
+        #     mode="min",
+        #     min_lr=self.lr / 20,
+        #     verbose=True,
+        #     factor=self.lr_scheduler_gamma,
+        #     patience=3,
+        # )
 
-        scheduler = {
-            "scheduler": self.lr_scheduler,
-            "reduce_on_plateau": True,
-            "monitor": "valid_loss",
-        }
+        # scheduler = {
+        #     "scheduler": self.lr_scheduler,
+        #     "reduce_on_plateau": True,
+        #     "monitor": "valid_loss",
+        # }
 
-        return [self.optimizer], [scheduler]
+        # return [self.optimizer], [scheduler]
 
         # self.lr_scheduler = torch.optim.lr_scheduler.StepLR(
         #     self.optimizer,

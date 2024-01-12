@@ -36,7 +36,7 @@ def main(args):
     lr_monitor = LearningRateMonitor(logging_interval='step')
 
     checkpoint_callback = ModelCheckpoint(
-        monitor='valid_loss',
+        monitor='valid_acc',
         mode="max",
         save_top_k=2,
         save_last=True,
@@ -64,7 +64,8 @@ def main(args):
         use_last_hidden_state=args.use_last_hidden_state,
         log_dir=log_dir,
         no_hidden_layer=args.no_hidden_layer,
-        loss_threshold=args.loss_threshold
+        loss_threshold=args.loss_threshold,
+        lr_scheduler_gamma=args.lr_scheduler_gamma
     )
     
     trainer.fit(model, datamodule=data_module)

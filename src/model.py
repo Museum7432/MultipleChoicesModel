@@ -74,14 +74,12 @@ class MultipleChoicesModel(L.LightningModule):
             )
 
         # TODO: num_classes is not always 4
-        
+
         self.valid_f1 = torchmetrics.classification.F1Score(
             task="multiclass", num_classes=4
         )
 
-        self.valid_acc = torchmetrics.Accuracy(
-            task="multiclass", num_classes=4
-        )
+        self.valid_acc = torchmetrics.Accuracy(task="multiclass", num_classes=4)
 
         self.use_last_hidden_state = use_last_hidden_state
 
@@ -153,44 +151,68 @@ class MultipleChoicesModel(L.LightningModule):
         self.train_res = {"pred": [], "label": []}
 
     def on_train_epoch_end(self):
-
-        f1_sc = f1_score(self.train_res["pred"], self.train_res["label"], average='micro')
+        f1_sc = f1_score(
+            self.train_res["pred"], self.train_res["label"], average="micro"
+        )
 
         self.log("train_f1", f1_sc)
         self.train_res = {"pred": [], "label": []}
 
     def training_step(self, batch):
-        res = self(batch)
+        if self.loss_threshold_gamma:
+            # calculate the loss and then skip those that has lower loss than the threshold
+            with torch.no_grad():
+                res = self(batch)
 
-        self.train_res["pred"] += res["pred_choices"].detach().tolist()
-        self.train_res["label"] += batch["label"].detach().tolist()
+                self.train_res["pred"] += res["pred_choices"].detach().tolist()
+                self.train_res["label"] += batch["label"].detach().tolist()
+
+                loss = self.calc_masked_loss(
+                    choices_logits=res["choices_logits"],
+                    indicators_token_offset_mask=batch["indicators_token_offset_mask"],
+                    label=batch["label"],
+                )
+
+                batch_loss_max = loss.max()
+
+                self.log("loss", loss.detach(), prog_bar=True)
+
+                if not hasattr(self, "loss_threshold"):
+                    self.loss_threshold = batch_loss_max
+                else:
+                    if batch_loss_max > self.loss_threshold * 1.012:
+                        self.loss_threshold = batch_loss_max / 1.012
+                    else:
+                        self.loss_threshold = (
+                            self.loss_threshold * (1 - self.loss_threshold_gamma)
+                            + batch_loss_max * self.loss_threshold_gamma
+                        )
+
+                indices = torch.where(loss >= self.loss_threshold)[0]
+
+            # remove those from the batch
+            if indices.size(dim=0) == 0:
+                # skip this whole batch
+                return None
+
+            for k in batch.keys():
+                batch[k] = torch.index_select(batch[k], 0, indices)
+
+        res = self(batch)
 
         loss = self.calc_masked_loss(
             choices_logits=res["choices_logits"],
             indicators_token_offset_mask=batch["indicators_token_offset_mask"],
             label=batch["label"],
         )
-        
-        # loss thresholding
-        if self.loss_threshold_gamma:
-            batch_loss_mean = loss.detach().mean()
 
-            if not hasattr(self, 'loss_threshold'):
-                self.loss_threshold = batch_loss_mean
-            else:
-                self.loss_threshold = self.loss_threshold * (1-self.loss_threshold_gamma) + batch_loss_mean * self.loss_threshold_gamma
-            
-            self.log("loss_threshold", self.loss_threshold.detach())
-
-            # then mask all loss values that is smaller than loss_threshold
-
-            mask = torch.where(loss < self.loss_threshold, 0.0, 1.0)
-
-            loss = loss * mask
+        if self.loss_threshold_gamma is None:
+            self.train_res["pred"] += res["pred_choices"].detach().tolist()
+            self.train_res["label"] += batch["label"].detach().tolist()
+            self.log("loss", loss.detach(), prog_bar=True)
 
         loss = loss.sum()
 
-        self.log("loss", loss.detach(), prog_bar=True)
         return loss
 
     def validation_step(self, batch):

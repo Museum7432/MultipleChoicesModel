@@ -27,7 +27,7 @@ class MultipleChoicesModel(L.LightningModule):
         encoder_name="google/flan-t5-large",
         lr=1e-5,
         use_last_hidden_state=True,
-        loss_threshold=None,
+        loss_threshold_gamma=None,
         log_dir=None,
         no_hidden_layer=False,
         lr_scheduler_gamma=0.75,
@@ -40,7 +40,7 @@ class MultipleChoicesModel(L.LightningModule):
         super().__init__()
         self.save_hyperparameters()
 
-        if "t5" in encoder_name:
+        if "t5" in encoder_name.lower() or "ul2" in encoder_name.lower():
             encoder = T5EncoderModel.from_pretrained(encoder_name)
 
         else:
@@ -53,7 +53,7 @@ class MultipleChoicesModel(L.LightningModule):
 
         self.lr = lr
 
-        self.loss_threshold = loss_threshold
+        self.loss_threshold_gamma = loss_threshold_gamma
 
         hidden_size = self.encoder.config.hidden_size
 
@@ -170,11 +170,22 @@ class MultipleChoicesModel(L.LightningModule):
             indicators_token_offset_mask=batch["indicators_token_offset_mask"],
             label=batch["label"],
         )
+        
+        # loss thresholding
+        if self.loss_threshold_gamma:
+            batch_loss_mean = loss.detach().mean()
 
-        # TODO: mask all loss values that is smaller than 0.2
+            if not hasattr(self, 'loss_threshold'):
+                self.loss_threshold = batch_loss_mean
+            else:
+                self.loss_threshold = self.loss_threshold * (1-self.loss_threshold_gamma) + batch_loss_mean * self.loss_threshold_gamma
+            
+            self.log("loss_threshold", self.loss_threshold.detach())
 
-        if self.loss_threshold:
+            # then mask all loss values that is smaller than loss_threshold
+
             mask = torch.where(loss < self.loss_threshold, 0.0, 1.0)
+
             loss = loss * mask
 
         loss = loss.sum()

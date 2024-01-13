@@ -103,8 +103,6 @@ class SemevalDataset(Dataset):
     def __getitem__(self, idx):
         item = self.entries[idx]
 
-        input_text = item["question"]
-
         if self.include_label:
             label = item["label"]
 
@@ -134,15 +132,29 @@ class SemevalDataset(Dataset):
                     label = choice_list.index(answer)
                 else:
                     label = len(choice_list) - 1
-            
-            for _ in range(4-len(choice_list)):
-                choice_list.append(randomsent(18))
-        
+
+            for _ in range(4 - len(choice_list)):
+                choice_list.append(randomsent(random.randint(5, 20)))
+
         if self.shuffle_choices:
             # shuffle the choice list
             tmp = list(enumerate(choice_list))
             random.shuffle(tmp)
             old_indices, choice_list = zip(*tmp)
+
+        if self.promt_style:
+            input_text = "Question: ("
+            for i in range(len(choice_list)):
+                input_text += self.choice_indicators[i][
+                    self.main_indicator_char_offset[i]
+                ]
+                if i != len(choice_list) - 1:
+                    input_text += " or "
+            input_text += ") "
+
+            input_text += item["question"]
+        else:
+            input_text = item["question"]
 
         indicators_char_offset = []
 
@@ -156,6 +168,9 @@ class SemevalDataset(Dataset):
 
             else:
                 input_text += self.choice_indicator + choice
+
+        if self.promt_style:
+            input_text += " Answer: "
 
         tokenized = self.tokenizer(input_text)
 

@@ -154,9 +154,9 @@ class MultipleChoicesModel(L.LightningModule):
 
     def on_train_epoch_end(self):
 
-        f1_score = f1_score(self.train_res["pred"], self.train_res["label"], average='micro')
+        f1_sc = f1_score(self.train_res["pred"], self.train_res["label"], average='micro')
 
-        self.log("train_f1", f1_score)
+        self.log("train_f1", f1_sc)
         self.train_res = {"pred": [], "label": []}
 
     def training_step(self, batch):

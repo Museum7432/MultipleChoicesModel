@@ -5,9 +5,14 @@ from model import MultipleChoicesModel
 from lightning.pytorch.loggers import WandbLogger, TensorBoardLogger
 from data import SemevalDataModule
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+import torch
+
 
 def main(args):
     L.seed_everything(69, workers=True)
+
+
+    torch.set_float32_matmul_precision(args.float32_matmul_precision)
 
 
     data_module = SemevalDataModule(
@@ -74,18 +79,19 @@ def main(args):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--accelerator", default=None)
-    parser.add_argument("--devices", default=None)
+    parser.add_argument("--accelerator", default="gpu")
+    parser.add_argument("--devices", default=1)
     parser.add_argument("--precision", default="32-true")
     parser.add_argument("--wandb", action="store_true")
+    parser.add_argument("--float32_matmul_precision", type=str, default="highest")
 
     parser.add_argument("--accumulate_grad_batches",type=int, default=1)
-    parser.add_argument("--max_epochs",type=int, default=None)
+    parser.add_argument("--max_epochs",type=int, default=-1)
 
 
     
     parser.add_argument("--encoder_name", type=str, default="google/flan-t5-large")
-    parser.add_argument("--lr", type=float, default=5e-6)
+    parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--lr_scheduler_gamma", type=float, default=0.75)
     parser.add_argument("--loss_threshold", type=float, default=None)
     # since flanT5 didnt add any special token to the start of the input

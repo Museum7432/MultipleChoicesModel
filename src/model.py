@@ -87,6 +87,8 @@ class MultipleChoicesModel(L.LightningModule):
 
         self.lr_scheduler_gamma = lr_scheduler_gamma
 
+        self.effective_trainning_step = 0
+
     # @staticmethod
     # def add_model_specific_args(parent_parser):
     #     parser = parent_parser.add_argument_group("MultipleChoicesModel")
@@ -175,18 +177,25 @@ class MultipleChoicesModel(L.LightningModule):
 
                 batch_loss_max = loss.max()
 
-                self.log("loss", loss.detach(), prog_bar=True)
+                self.log("loss", loss.detach().sum(), prog_bar=True)
 
                 if not hasattr(self, "loss_threshold"):
                     self.loss_threshold = batch_loss_max
                 else:
-                    if batch_loss_max > self.loss_threshold * 1.012:
-                        self.loss_threshold = batch_loss_max / 1.012
+                    if batch_loss_max > self.loss_threshold * 1.06:
+                        self.loss_threshold = batch_loss_max / 1.06
+                    elif batch_loss_max > self.loss_threshold * 0.94:
+                        self.loss_threshold = (
+                            self.loss_threshold * (1 - self.loss_threshold_gamma*3)
+                            + batch_loss_max * self.loss_threshold_gamma*3
+                        )
                     else:
                         self.loss_threshold = (
                             self.loss_threshold * (1 - self.loss_threshold_gamma)
                             + batch_loss_max * self.loss_threshold_gamma
                         )
+                
+                self.log("loss_threshold", self.loss_threshold)
 
                 indices = torch.where(loss >= self.loss_threshold)[0]
 
@@ -197,6 +206,8 @@ class MultipleChoicesModel(L.LightningModule):
 
             for k in batch.keys():
                 batch[k] = torch.index_select(batch[k], 0, indices)
+            
+
 
         res = self(batch)
 
@@ -205,14 +216,14 @@ class MultipleChoicesModel(L.LightningModule):
             indicators_token_offset_mask=batch["indicators_token_offset_mask"],
             label=batch["label"],
         )
+        loss = loss.sum()
 
         if self.loss_threshold_gamma is None:
             self.train_res["pred"] += res["pred_choices"].detach().tolist()
             self.train_res["label"] += batch["label"].detach().tolist()
             self.log("loss", loss.detach(), prog_bar=True)
-
-        loss = loss.sum()
-
+        
+        self.effective_trainning_step += batch["label"].size(dim=0)
         return loss
 
     def validation_step(self, batch):
@@ -230,6 +241,7 @@ class MultipleChoicesModel(L.LightningModule):
         self.log("valid_f1", self.valid_f1, prog_bar=True)
         self.log("valid_loss", loss.detach())
 
+        self.log("effective_trainning_step", self.effective_trainning_step)
         return loss
 
     def configure_optimizers(self):
@@ -280,7 +292,7 @@ class MultipleChoicesModel(L.LightningModule):
         # self.global_step
         pathlib.Path(self.log_dir, "eval").mkdir(exist_ok=True)
 
-        output_file = pathlib.Path(self.log_dir, "eval", str(self.global_step) + ".txt")
+        output_file = pathlib.Path(self.log_dir, "eval", str(self.effective_trainning_step) + ".txt")
 
         with open(output_file, "w") as txt_file:
             for i in self.test_res:

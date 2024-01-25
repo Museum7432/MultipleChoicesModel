@@ -102,19 +102,17 @@ class SemevalDataset(Dataset):
 
     def __getitem__(self, idx):
         item = self.entries[idx]
+        choice_list = item["choice_list"].copy()
 
         if self.include_label:
             label = item["label"]
+            answer = choice_list[label]
 
-        choice_list = item["choice_list"].copy()
 
         # assume that the last item of choice_list is always "None of above."
         # randomly remove 0, 1, or 2 of the other choices into a random string or remove that option entirely
 
         if self.reduce_choices:
-            if self.include_label:
-                answer = choice_list[label]
-
             if random.random() < 0.66:
                 # 66% chance of removing 1 choice or more
                 # so 34% chance of having all 4 choices
@@ -127,32 +125,39 @@ class SemevalDataset(Dataset):
                     indice = random.randint(0, 1)
                     choice_list.pop(indice)
 
+            for _ in range(4 - len(choice_list)):
+                choice_list.insert(0, randomsent(random.randint(5, 20)))
+
             if self.include_label:
                 if answer in choice_list:
                     label = choice_list.index(answer)
                 else:
                     label = len(choice_list) - 1
+                    answer = choice_list[label]
 
-            for _ in range(4 - len(choice_list)):
-                choice_list.append(randomsent(random.randint(5, 20)))
 
         if self.shuffle_choices:
             # shuffle the choice list
-            tmp = list(enumerate(choice_list))
+            tmp = choice_list[:-1]
             random.shuffle(tmp)
-            old_indices, choice_list = zip(*tmp)
+
+            choice_list = tmp + [choice_list[-1]]
+            if self.include_label:
+                label = choice_list.index(answer)
 
         if self.promt_style:
-            input_text = "Question: ("
-            for i in range(len(choice_list)):
-                input_text += self.choice_indicators[i][
-                    self.main_indicator_char_offset[i]
-                ]
-                if i != len(choice_list) - 1:
-                    input_text += " or "
-            input_text += ") "
+            # input_text = "Question: ("
+            # for i in range(len(choice_list)):
+            #     input_text += self.choice_indicators[i][
+            #         self.main_indicator_char_offset[i]
+            #     ]
+            #     if i != len(choice_list) - 1:
+            #         input_text += " or "
+            # input_text += ") "
 
-            input_text += item["question"]
+            # input_text += item["question"]
+
+            input_text = "Q: " + item["question"]
         else:
             input_text = item["question"]
 
@@ -169,8 +174,8 @@ class SemevalDataset(Dataset):
             else:
                 input_text += self.choice_indicator + choice
 
-        if self.promt_style:
-            input_text += " Answer: "
+        # if self.promt_style:
+        #     input_text += " Answer: "
 
         tokenized = self.tokenizer(input_text)
 
@@ -183,15 +188,11 @@ class SemevalDataset(Dataset):
             "attention_mask": tokenized["attention_mask"],
             "last_token_indice": len(tokenized["input_ids"]) - 1,
             "indicators_token_offset": indicators_token_offset,
-            "indicators_token_offset_mask": [1] * len(indicators_token_offset),
+            "indicators_token_offset_mask": [1] * len(indicators_token_offset)
         }
-
         if self.include_label:
-            if self.shuffle_choices:
-                re["label"] = old_indices.index(label)
-            else:
-                re["label"] = label
-
+            re["label"] = label
+        
         return re
 
 
@@ -285,9 +286,12 @@ class SemevalDataModule(L.LightningDataModule):
             train_data = train_data[:20]
             eval_data = eval_data[:20]
 
-        train_set, valid_set = train_test_split(
-            train_data, test_size=0.1, random_state=42
-        )
+        # train_set, valid_set = train_test_split(
+        #     train_data, test_size=0.1, random_state=42
+        # )
+        train_set = train_data
+        # splitting the training set might cause data leakage so we will be using a difference validation set
+        valid_set = list(np.load("dataset/WP_gt.npy", allow_pickle=True))
 
         self.trainDataset = SemevalDataset(
             raw_data=train_set,
@@ -323,7 +327,7 @@ class SemevalDataModule(L.LightningDataModule):
             self.trainDataset,
             batch_size=self.train_batch_size,
             collate_fn=collate_fn_factory(self.pad_token_id),
-            pin_memory=True,
+            # pin_memory=True,
             shuffle=True,
             num_workers=self.num_workers,
         )
@@ -333,7 +337,7 @@ class SemevalDataModule(L.LightningDataModule):
             self.validDataset,
             batch_size=self.valid_batch_size,
             collate_fn=collate_fn_factory(self.pad_token_id),
-            pin_memory=True,
+            # pin_memory=True,
             shuffle=False,
             num_workers=self.num_workers,
         )

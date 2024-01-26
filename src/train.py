@@ -31,7 +31,7 @@ def main(args):
 
     loggers = []
     if args.wandb:
-        loggers.append(WandbLogger(project="semeval"))
+        loggers.append(WandbLogger(project=args.exp_name))
 
     tb = TensorBoardLogger("./")
     loggers.append(tb)
@@ -69,13 +69,13 @@ def main(args):
         use_last_hidden_state=args.use_last_hidden_state,
         log_dir=log_dir,
         no_hidden_layer=args.no_hidden_layer,
-        loss_threshold_gamma=args.loss_threshold_gamma,
+        loss_threshold=args.loss_threshold,
         lr_scheduler_gamma=args.lr_scheduler_gamma
     )
     
     trainer.fit(model, datamodule=data_module)
 
-    trainer.test(ckpt_path='last', datamodule=data_module)
+    trainer.test(model, datamodule=data_module)
 
     trainer.test(ckpt_path="best", datamodule=data_module)
 
@@ -86,6 +86,8 @@ if __name__ == "__main__":
     parser.add_argument("--precision", default="32-true")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--float32_matmul_precision", type=str, default="highest")
+    
+    parser.add_argument("--exp_name",type=str, default="semeval")
 
     parser.add_argument("--accumulate_grad_batches",type=int, default=1)
     parser.add_argument("--max_epochs",type=int, default=-1)
@@ -95,7 +97,7 @@ if __name__ == "__main__":
     parser.add_argument("--encoder_name", type=str, default="google/flan-t5-large")
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--lr_scheduler_gamma", type=float, default=0.75)
-    parser.add_argument("--loss_threshold_gamma", type=float, default=None)
+    parser.add_argument("--loss_threshold", type=float, default=None)
     # since flanT5 didnt add any special token to the start of the input
     parser.add_argument("--use_last_hidden_state", action="store_true")
     parser.add_argument("--no_hidden_layer", action="store_true")

@@ -19,6 +19,7 @@ from transformers.optimization import get_linear_schedule_with_warmup
 
 import torchmetrics
 from argparse import ArgumentParser
+from datetime import datetime
 
 
 class MultipleChoicesModel(L.LightningModule):
@@ -27,7 +28,7 @@ class MultipleChoicesModel(L.LightningModule):
         encoder_name="google/flan-t5-large",
         lr=1e-5,
         use_last_hidden_state=True,
-        loss_threshold_gamma=None,
+        loss_threshold=None,
         log_dir=None,
         no_hidden_layer=False,
         lr_scheduler_gamma=0.75,
@@ -53,7 +54,8 @@ class MultipleChoicesModel(L.LightningModule):
 
         self.lr = lr
 
-        self.loss_threshold_gamma = loss_threshold_gamma
+        self.lr_scheduler_gamma = lr_scheduler_gamma
+        self.loss_threshold = loss_threshold
 
         hidden_size = self.encoder.config.hidden_size
 
@@ -73,6 +75,17 @@ class MultipleChoicesModel(L.LightningModule):
                 nn.Linear(hidden_size, 1),
             )
 
+            # self.choices_classifier = nn.Sequential(
+            #     nn.Dropout(dropout_prob),
+            #     nn.Linear(hidden_size * 2, hidden_size),
+            #     nn.GELU(),
+            #     nn.Dropout(dropout_prob),
+            #     nn.Linear(hidden_size, hidden_size // 2),
+            #     nn.GELU(),
+            #     nn.Dropout(dropout_prob),
+            #     nn.Linear(hidden_size // 2, 1),
+            # )
+
         # TODO: num_classes is not always 4
 
         self.valid_f1 = torchmetrics.classification.F1Score(
@@ -84,8 +97,6 @@ class MultipleChoicesModel(L.LightningModule):
         self.use_last_hidden_state = use_last_hidden_state
 
         self.log_dir = log_dir
-
-        self.lr_scheduler_gamma = lr_scheduler_gamma
 
         self.effective_trainning_step = 0
 
@@ -161,7 +172,7 @@ class MultipleChoicesModel(L.LightningModule):
         self.train_res = {"pred": [], "label": []}
 
     def training_step(self, batch):
-        if self.loss_threshold_gamma:
+        if self.loss_threshold:
             # calculate the loss and then skip those that has lower loss than the threshold
             with torch.no_grad():
                 res = self(batch)
@@ -175,27 +186,7 @@ class MultipleChoicesModel(L.LightningModule):
                     label=batch["label"],
                 )
 
-                batch_loss_max = loss.max()
-
                 self.log("loss", loss.detach().sum(), prog_bar=True)
-
-                if not hasattr(self, "loss_threshold"):
-                    self.loss_threshold = batch_loss_max
-                else:
-                    if batch_loss_max > self.loss_threshold * 1.06:
-                        self.loss_threshold = batch_loss_max / 1.06
-                    elif batch_loss_max > self.loss_threshold * 0.94:
-                        self.loss_threshold = (
-                            self.loss_threshold * (1 - self.loss_threshold_gamma*3)
-                            + batch_loss_max * self.loss_threshold_gamma*3
-                        )
-                    else:
-                        self.loss_threshold = (
-                            self.loss_threshold * (1 - self.loss_threshold_gamma)
-                            + batch_loss_max * self.loss_threshold_gamma
-                        )
-                
-                self.log("loss_threshold", self.loss_threshold)
 
                 indices = torch.where(loss >= self.loss_threshold)[0]
 
@@ -206,8 +197,6 @@ class MultipleChoicesModel(L.LightningModule):
 
             for k in batch.keys():
                 batch[k] = torch.index_select(batch[k], 0, indices)
-            
-
 
         res = self(batch)
 
@@ -218,11 +207,11 @@ class MultipleChoicesModel(L.LightningModule):
         )
         loss = loss.sum()
 
-        if self.loss_threshold_gamma is None:
+        if self.loss_threshold is None:
             self.train_res["pred"] += res["pred_choices"].detach().tolist()
             self.train_res["label"] += batch["label"].detach().tolist()
             self.log("loss", loss.detach(), prog_bar=True)
-        
+
         self.effective_trainning_step += batch["label"].size(dim=0)
         return loss
 
@@ -292,7 +281,11 @@ class MultipleChoicesModel(L.LightningModule):
         # self.global_step
         pathlib.Path(self.log_dir, "eval").mkdir(exist_ok=True)
 
-        output_file = pathlib.Path(self.log_dir, "eval", str(self.effective_trainning_step) + ".txt")
+        print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+        output_file = pathlib.Path(
+            self.log_dir, "eval", datetime.now().strftime("%H_%M_%S") + ".txt"
+        )
 
         with open(output_file, "w") as txt_file:
             for i in self.test_res:

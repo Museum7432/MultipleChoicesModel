@@ -253,13 +253,11 @@ class MultipleChoicesModel(L.LightningModule):
 
         # return self.optimizer
         num_steps = self.num_steps()
-
-        num_warmup_steps = num_steps * 0.20
-
+        
         self.lr_scheduler = get_linear_schedule_with_warmup(
             self.optimizer,
-            num_warmup_steps=num_warmup_steps,
-            num_training_steps=num_steps - num_warmup_steps,
+            num_warmup_steps=num_steps * 0.20,
+            num_training_steps=num_steps,
         )
 
         return [self.optimizer], [{"scheduler": self.lr_scheduler, "interval": "step"}]

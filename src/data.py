@@ -10,7 +10,7 @@ from sklearn.model_selection import train_test_split
 
 
 def randomsent(length=20):
-    return "".join(random.choice("abcdefghijklmnopqrstuvwxyz ") for i in range(length))
+    return "".join(random.choice("abcdefghijklmnopqrstuvwxyz                ") for i in range(length))
 
 
 class SemevalDataset(Dataset):
@@ -125,8 +125,8 @@ class SemevalDataset(Dataset):
                     indice = random.randint(0, 1)
                     choice_list.pop(indice)
 
-            # for _ in range(4 - len(choice_list)):
-            #     choice_list.insert(0, randomsent(random.randint(5, 20)))
+            for _ in range(4 - len(choice_list)):
+                choice_list.insert(0, randomsent(random.randint(15, 20)))
 
             if self.include_label:
                 if answer in choice_list:
@@ -138,10 +138,12 @@ class SemevalDataset(Dataset):
 
         if self.shuffle_choices:
             # shuffle the choice list
-            tmp = choice_list[:-1]
-            random.shuffle(tmp)
+            # tmp = choice_list[:-1]
+            # random.shuffle(tmp)
+            # choice_list = tmp + [choice_list[-1]]
+            
+            random.shuffle(choice_list)
 
-            choice_list = tmp + [choice_list[-1]]
             if self.include_label:
                 label = choice_list.index(answer)
 

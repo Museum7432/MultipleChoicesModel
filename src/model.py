@@ -50,6 +50,8 @@ class MultipleChoicesModel(L.LightningModule):
                 add_pooling_layer=False,
             )
 
+        # encoder.gradient_checkpointing_enable()
+
         self.encoder = encoder
 
         self.lr = lr
@@ -233,40 +235,34 @@ class MultipleChoicesModel(L.LightningModule):
         self.log("effective_trainning_step", self.effective_trainning_step)
         return loss
 
+    def num_steps(self) -> int:
+        """Get number of steps"""
+        # Accessing _data_source is flaky and might break
+        dataset = self.trainer.fit_loop._data_source.dataloader()
+        dataset_size = len(dataset)
+        num_devices = max(1, self.trainer.num_devices)
+        num_steps = (
+            dataset_size
+            * self.trainer.max_epochs
+            // (self.trainer.accumulate_grad_batches * num_devices)
+        )
+        return num_steps
+
     def configure_optimizers(self):
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
 
-        return self.optimizer
+        # return self.optimizer
+        num_steps = self.num_steps()
 
-        # self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        #     self.optimizer,
-        #     mode="min",
-        #     min_lr=self.lr / 20,
-        #     verbose=True,
-        #     factor=self.lr_scheduler_gamma,
-        #     patience=3,
-        # )
+        num_warmup_steps = num_steps * 0.20
 
-        # scheduler = {
-        #     "scheduler": self.lr_scheduler,
-        #     "reduce_on_plateau": True,
-        #     "monitor": "valid_loss",
-        # }
+        self.lr_scheduler = get_linear_schedule_with_warmup(
+            self.optimizer,
+            num_warmup_steps=num_warmup_steps,
+            num_training_steps=num_steps - num_warmup_steps,
+        )
 
-        # return [self.optimizer], [scheduler]
-
-        # self.lr_scheduler = torch.optim.lr_scheduler.StepLR(
-        #     self.optimizer,
-        #     step_size=2,
-        #     gamma=self.lr_scheduler_gamma
-        # )
-
-        # scheduler = {
-        #     "scheduler": self.lr_scheduler,
-        #     "interval": "epoch"
-        # }
-
-        # return [self.optimizer], [scheduler]
+        return [self.optimizer], [{"scheduler": self.lr_scheduler, "interval": "step"}]
 
     def on_test_epoch_start(self):
         self.test_res = []
